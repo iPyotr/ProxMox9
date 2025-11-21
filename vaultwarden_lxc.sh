@@ -7,13 +7,15 @@ echo "=== Автоматическая установка Vaultwarden (Docker) �
 DEF_CTID=150
 DEF_HOSTNAME="vaultwarden"
 DEF_PASSWORD="vaultpass"
-DEF_DOMAIN="vault.codaro.ru" # Убрали HTTPS-префикс
+DEF_DOMAIN="vault.codaro.ru"
 DEF_CPU=2
 DEF_RAM=1024
 DEF_ROOTFS=8
-DEF_STORAGE="local-lvm" # Значение хранилища по умолчанию
+DEF_STORAGE="local-lvm" 
 
 # --- Спросим, использовать ли значения по умолчанию ---
+# ... (Остальная часть обработки ввода остается без изменений) ...
+
 read -p "Хотите использовать значения по умолчанию? [Y/n]: " USE_DEFAULT
 USE_DEFAULT=${USE_DEFAULT:-Y}
 
@@ -65,14 +67,21 @@ if [ -z "$ADMIN_TOKEN" ]; then
     echo "Сгенерирован ADMIN_TOKEN: $ADMIN_TOKEN"
 fi
 
+
 # --- Обновляем шаблоны Proxmox ---
 echo ">>> Обновляем список шаблонов Proxmox..."
 pveam update
-# Ищем шаблон Debian 12 (Bookworm) - он более стабилен и актуален для Docker
-TEMPLATE=$(pveam available | grep -E 'debian-12-standard.*amd64\.tar\.zst' | tail -n1 | awk '{print $2}')
+# Ищем шаблон Debian 13 (Trixie) - наиболее свежий и соответствующий Proxmox 9
+TEMPLATE=$(pveam available | grep -E 'debian-13-standard.*amd64\.tar\.zst' | tail -n1 | awk '{print $2}')
+
+# Если Debian 13 не найден, пробуем Debian 12 для обратной совместимости
+if [ -z "$TEMPLATE" ]; then
+    echo "Предупреждение: Шаблон Debian 13 не найден. Ищем Debian 12..."
+    TEMPLATE=$(pveam available | grep -E 'debian-12-standard.*amd64\.tar\.zst' | tail -n1 | awk '{print $2}')
+fi
 
 if [ -z "$TEMPLATE" ]; then
-    echo "Ошибка: не найден шаблон Debian 12!"
+    echo "Ошибка: Не найден шаблон Debian 13 или Debian 12!"
     exit 1
 fi
 echo "Используем шаблон: $TEMPLATE"
@@ -131,29 +140,30 @@ set -e
 apt update && apt upgrade -y
 apt install -y locales curl sudo gnupg apt-transport-https ca-certificates lsb-release
 
-# --- Настройка локали ru_RU.UTF-8 ---
+# --- Настройка локали ru_RU.UTF-8 (Игнорируем предупреждение, если не получается) ---
+# Это решит проблему с "warning: setlocale: LC_ALL: cannot change locale (ru_RU.UTF-8)"
 echo "ru_RU.UTF-8 UTF-8" >> /etc/locale.gen
-locale-gen ru_RU.UTF-8
-export LANG=ru_RU.UTF-8
-export LC_ALL=ru_RU.UTF-8
+locale-gen 
 
-# --- Установка Docker с официального репозитория (более надежно) ---
+# --- Установка Docker с официального репозитория (Исправлено) ---
 echo ">>> Установка Docker..."
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 
+# Используем os-release, чтобы гарантировать правильное кодовое имя ОС внутри контейнера
+OS_CODENAME=\$(. /etc/os-release && echo "\$VERSION_CODENAME")
+
 echo \
-  "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-  "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+  "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  \$OS_CODENAME stable" | \
   tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker
 
-# --- Установка Node.js (через nvm или n - для прода лучше использовать n) ---
-# Для простоты и стабильности в LXC установим из репозитория:
+# --- Установка Node.js ---
 echo ">>> Установка Node.js и npm..."
 curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
 apt install -y nodejs 
@@ -172,13 +182,13 @@ services:
     environment:
       WEBSOCKET_ENABLED: "true"
       SIGNUPS_ALLOWED: "false"
-      DOMAIN: "https://$DOMAIN" # Используем HTTPS, предполагая, что вы настроите реверс-прокси
+      DOMAIN: "https://$DOMAIN"
       ADMIN_TOKEN: "$ADMIN_TOKEN"
       ROCKET_PORT: 80
     volumes:
       - ./data:/data
     ports:
-      - "8080:80" # Порт для доступа с хоста Proxmox
+      - "8080:80"
 EOL
 
 docker compose up -d
@@ -194,6 +204,7 @@ echo "======================================================="
 echo "✅ Контейнер $CTID успешно создан и Vaultwarden запущен!"
 echo "======================================================="
 echo " Контейнер ID: $CTID"
+# ... (Остальная часть вывода) ...
 echo " IP контейнера: $IP"
 echo " Hostname: $HOSTNAME"
 echo "---"
@@ -207,5 +218,4 @@ echo ""
 
 # --- Дополнительное примечание ---
 echo "⚠️ ВАЖНО: Vaultwarden внутри контейнера слушает порт 80. "
-echo "Он доступен по порту 8080 вашего LXC-контейнера."
 echo "Для использования https:// необходимо настроить внешний реверс-прокси (Nginx/Traefik)!"
