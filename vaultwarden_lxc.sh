@@ -79,29 +79,30 @@ echo ">>> Настраиваем контейнер..."
 pct exec $CTID -- bash <<EOF
 set -e
 
-# Настройка локали
-apt update
-apt install -y locales
+# --- Настройка локали и установка пакетов ---
+pct exec $CTID -- bash <<'EOF'
+set -e
 
-# Добавляем локаль в /etc/locale.gen
+# Устанавливаем необходимые пакеты
+apt update
+apt install -y locales curl sudo gnupg lsb-release apt-transport-https ca-certificates software-properties-common
+
+# Генерация русской локали
 if ! grep -q "ru_RU.UTF-8 UTF-8" /etc/locale.gen; then
     echo "ru_RU.UTF-8 UTF-8" >> /etc/locale.gen
 fi
-
-# Генерируем локаль
 locale-gen ru_RU.UTF-8
 
-# Обновляем системные переменные
-update-locale LANG=ru_RU.UTF-8 LC_ALL=ru_RU.UTF-8
-
-# Экспортируем в текущую сессию
+# Экспорт переменных для текущей сессии и будущих логинов
 export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
+echo "export LANG=ru_RU.UTF-8" >> /root/.bashrc
+echo "export LC_ALL=ru_RU.UTF-8" >> /root/.bashrc
 
-# Установка необходимых пакетов
-apt install -y curl sudo gnupg lsb-release apt-transport-https ca-certificates software-properties-common
+# Проверка локали
+locale
 
-# Docker
+# Установка Docker
 if ! command -v docker &> /dev/null; then
     apt install -y docker.io docker-compose-plugin
     systemctl enable --now docker
