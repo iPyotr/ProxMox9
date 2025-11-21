@@ -5,10 +5,8 @@ set -e
 echo "=== Автоматическая установка Vaultwarden в LXC на Proxmox VE 9 ==="
 
 # --- Ввод параметров пользователем ---
-# Автоматический выбор CTID, если пользователь оставляет пустое поле
-read -p "Введите ID контейнера (например 150, оставьте пустым для автоподстановки): " CTID
+read -p "Введите ID контейнера (оставьте пустым для автоподстановки): " CTID
 if [ -z "$CTID" ]; then
-    # ищем первый свободный CTID >=150
     EXISTING=$(pct list | awk 'NR>1 {print $1}')
     CTID=150
     while echo "$EXISTING" | grep -q "^$CTID\$"; do
@@ -17,13 +15,12 @@ if [ -z "$CTID" ]; then
     echo "Автоматически выбран CTID: $CTID"
 fi
 
-read -p "Введите hostname контейнера (например vaultwarden, оставьте пустым для автоподстановки): " HOSTNAME
+read -p "Введите hostname контейнера (оставьте пустым для автоподстановки 'vaultwarden'): " HOSTNAME
 HOSTNAME=${HOSTNAME:-vaultwarden}
 
 read -p "Введите пароль root для контейнера: " PASSWORD
 read -p "Введите домен для Vaultwarden (например https://vault.codaro.ru): " DOMAIN
 read -p "Введите ADMIN TOKEN (оставьте пустым для автогенерации): " ADMIN_TOKEN
-
 if [ -z "$ADMIN_TOKEN" ]; then
     ADMIN_TOKEN=$(openssl rand -hex 32)
 fi
@@ -77,15 +74,21 @@ echo ">>> Запускаем контейнер..."
 pct start $CTID
 sleep 20
 
-# --- Установка Docker и Vaultwarden ---
-echo ">>> Устанавливаем Vaultwarden внутри контейнера..."
+# --- Установка локали, Docker и Vaultwarden ---
+echo ">>> Настраиваем контейнер..."
 pct exec $CTID -- bash <<EOF
-
 set -e
 
-# Устанавливаем недостающие пакеты
-apt update && apt upgrade -y
-apt install -y curl sudo gnupg lsb-release apt-transport-https software-properties-common
+# Настройка локали
+apt update
+apt install -y locales
+locale-gen ru_RU.UTF-8
+update-locale LANG=ru_RU.UTF-8
+export LANG=ru_RU.UTF-8
+export LC_ALL=ru_RU.UTF-8
+
+# Установка необходимых пакетов
+apt install -y curl sudo gnupg lsb-release apt-transport-https ca-certificates software-properties-common
 
 # Docker
 if ! command -v docker &> /dev/null; then
@@ -93,9 +96,11 @@ if ! command -v docker &> /dev/null; then
     systemctl enable --now docker
 fi
 
+# Создание директории Vaultwarden
 mkdir -p /opt/vaultwarden
 cd /opt/vaultwarden
 
+# Docker Compose файл
 cat > docker-compose.yml <<EOL
 version: '3'
 services:
@@ -115,6 +120,7 @@ services:
       - "8080:80"
 EOL
 
+# Запуск Vaultwarden
 docker compose up -d
 EOF
 
