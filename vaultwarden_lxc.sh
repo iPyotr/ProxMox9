@@ -82,8 +82,19 @@ set -e
 # Настройка локали
 apt update
 apt install -y locales
+
+# Добавляем локаль в /etc/locale.gen
+if ! grep -q "ru_RU.UTF-8 UTF-8" /etc/locale.gen; then
+    echo "ru_RU.UTF-8 UTF-8" >> /etc/locale.gen
+fi
+
+# Генерируем локаль
 locale-gen ru_RU.UTF-8
-update-locale LANG=ru_RU.UTF-8
+
+# Обновляем системные переменные
+update-locale LANG=ru_RU.UTF-8 LC_ALL=ru_RU.UTF-8
+
+# Экспортируем в текущую сессию
 export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
 
