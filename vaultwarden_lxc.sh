@@ -5,8 +5,21 @@ set -e
 echo "=== Автоматическая установка Vaultwarden в LXC на Proxmox VE 9 ==="
 
 # --- Ввод параметров пользователем ---
-read -p "Введите ID контейнера (например 150): " CTID
-read -p "Введите hostname контейнера (например vaultwarden): " HOSTNAME
+# Автоматический выбор CTID, если пользователь оставляет пустое поле
+read -p "Введите ID контейнера (например 150, оставьте пустым для автоподстановки): " CTID
+if [ -z "$CTID" ]; then
+    # ищем первый свободный CTID >=150
+    EXISTING=$(pct list | awk 'NR>1 {print $1}')
+    CTID=150
+    while echo "$EXISTING" | grep -q "^$CTID\$"; do
+        CTID=$((CTID+1))
+    done
+    echo "Автоматически выбран CTID: $CTID"
+fi
+
+read -p "Введите hostname контейнера (например vaultwarden, оставьте пустым для автоподстановки): " HOSTNAME
+HOSTNAME=${HOSTNAME:-vaultwarden}
+
 read -p "Введите пароль root для контейнера: " PASSWORD
 read -p "Введите домен для Vaultwarden (например https://vault.codaro.ru): " DOMAIN
 read -p "Введите ADMIN TOKEN (оставьте пустым для автогенерации): " ADMIN_TOKEN
