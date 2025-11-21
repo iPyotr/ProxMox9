@@ -12,11 +12,12 @@ DEF_CPU=2
 DEF_RAM=1024
 DEF_ROOTFS=8
 
+# --- Спросим, использовать ли значения по умолчанию ---
 read -p "Хотите использовать значения по умолчанию? [Y/n]: " USE_DEFAULT
 USE_DEFAULT=${USE_DEFAULT:-Y}
 
 if [[ "$USE_DEFAULT" =~ ^[Yy]$ ]]; then
-    CTID=""
+    CTID=$DEF_CTID
     HOSTNAME=$DEF_HOSTNAME
     PASSWORD=$DEF_PASSWORD
     DOMAIN=$DEF_DOMAIN
@@ -38,7 +39,7 @@ else
     ROOTFS=${ROOTFS:-$DEF_ROOTFS}
 fi
 
-# --- Автоматический выбор CTID ---
+# --- Автоподстановка CTID если не указано ---
 if [ -z "$CTID" ]; then
     EXISTING=$(pct list | awk 'NR>1 {print $1}')
     CTID=$DEF_CTID
@@ -56,7 +57,7 @@ fi
 
 STORAGE="local-lvm"
 
-# --- Определяем последний шаблон Debian 13 ---
+# --- Обновляем шаблоны Proxmox ---
 echo ">>> Обновляем список шаблонов Proxmox..."
 pveam update
 TEMPLATE=$(pveam available | grep -E 'debian-13-standard.*amd64\.tar\.zst' | tail -n1 | awk '{print $2}')
@@ -67,13 +68,13 @@ if [ -z "$TEMPLATE" ]; then
 fi
 echo "Используем шаблон: $TEMPLATE"
 
-# --- Скачиваем шаблон если его нет локально ---
+# --- Скачиваем шаблон если отсутствует ---
 if ! pveam list local | grep -q "$TEMPLATE"; then
     echo ">>> Скачиваем шаблон в локальное хранилище..."
     pveam download local $TEMPLATE
 fi
 
-# --- Создание контейнера ---
+# --- Создаём контейнер ---
 echo ">>> Создаём LXC контейнер с DHCP и nesting..."
 pct create $CTID local:vztmpl/$TEMPLATE \
   --hostname $HOSTNAME \
@@ -92,34 +93,30 @@ echo ">>> Запускаем контейнер..."
 pct start $CTID
 sleep 20
 
-# --- Настройка локали, Docker и Vaultwarden ---
+# --- Настройка контейнера ---
 echo ">>> Настраиваем контейнер..."
 pct exec $CTID -- bash <<EOF
 set -e
 
-# Устанавливаем необходимые пакеты
+# --- Обновление и установка пакетов ---
 apt update
-apt install -y locales curl sudo gnupg lsb-release apt-transport-https ca-certificates software-properties-common
+# Устанавливаем пакеты, игнорируем software-properties-common если недоступен
+apt install -y locales curl sudo gnupg lsb-release apt-transport-https ca-certificates || true
+apt install -y software-properties-common || true
 
-# Генерация локали ru_RU.UTF-8
-if ! grep -q "ru_RU.UTF-8 UTF-8" /etc/locale.gen; then
-    echo "ru_RU.UTF-8 UTF-8" >> /etc/locale.gen
-fi
+# --- Настройка локали ru_RU.UTF-8 ---
+echo "ru_RU.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen ru_RU.UTF-8
-
-# Экспорт переменных локали
 export LANG=ru_RU.UTF-8
 export LC_ALL=ru_RU.UTF-8
 echo "export LANG=ru_RU.UTF-8" >> /root/.bashrc
 echo "export LC_ALL=ru_RU.UTF-8" >> /root/.bashrc
 
-# Установка Docker
-if ! command -v docker &> /dev/null; then
-    apt install -y docker.io docker-compose-plugin
-    systemctl enable --now docker
-fi
+# --- Установка Docker ---
+apt install -y docker.io docker-compose-plugin
+systemctl enable --now docker
 
-# Настройка Vaultwarden
+# --- Установка Vaultwarden ---
 mkdir -p /opt/vaultwarden
 cd /opt/vaultwarden
 
@@ -145,6 +142,7 @@ EOL
 docker compose up -d
 EOF
 
+# --- Вывод итогов ---
 IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
 
 echo ""
